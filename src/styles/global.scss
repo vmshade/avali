@@ -1,0 +1,76 @@
+@use 'colours' as *;
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-family: 'Geist Mono', 'Fira Code', monospace;
+  background: $zinc-950;
+  color: $zinc-100;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+#app {
+  width: 100%;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+:focus-visible {
+  outline: 1px solid var(--text);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: $zinc-100;
+  color: $zinc-950;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+html {
+  scrollbar-width: none;
+}
+
+:root {
+  --bg: #{$zinc-950};
+  --surface: #{$zinc-900};
+  --surface-raised: #{$zinc-900};
+  --surface-hover: #{$zinc-800};
+  --border: #{$zinc-800};
+  --border-strong: #{$zinc-700};
+  --text: #{$zinc-100};
+  --text-muted: #{$zinc-400};
+  --text-dim: #{$zinc-500};
+  --primary: #{$zinc-200};
+  --accent: #{$zinc-50};
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

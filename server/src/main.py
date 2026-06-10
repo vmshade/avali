@@ -1,0 +1,212 @@
+import asyncio
+import json
+import re
+import subprocess
+import time
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from .validate import validate_download_input, extract_video_id
+
+app = FastAPI(title="avali")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+RATE_LIMIT: dict[str, list[float]] = {}
+RATE_WINDOW = 60.0
+RATE_MAX = 5
+
+
+def rate_limit(ip: str) -> None:
+    now = time.time()
+    timestamps = RATE_LIMIT.get(ip, [])
+    timestamps = [t for t in timestamps if now - t < RATE_WINDOW]
+    if len(timestamps) >= RATE_MAX:
+        raise HTTPException(status_code=429, detail="slow down a little!!!")
+    timestamps.append(now)
+    RATE_LIMIT[ip] = timestamps
+
+
+class DownloadRequest(BaseModel):
+    url: str
+    format: str = "video+audio"
+    quality: int | None = None
+
+
+def sanitize_filename(name: str) -> str:
+    return re.sub(r'[^\w\s.-]', "", name).strip() or "video"
+
+
+def get_video_title(video_id: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["yt-dlp", "--print", "title", f"https://www.youtube.com/watch?v={video_id}"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+FORMAT_MIME = {
+    "video": "video/mp4",
+    "video+audio": "video/mp4",
+    "audio": "audio/mp4",
+}
+
+FORMAT_ARGS = {
+    "video": ["-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"],
+    "video+audio": ["-f", "best[ext=mp4]/best"],
+    "audio": ["-f", "bestaudio[ext=m4a]/bestaudio"],
+}
+
+
+def get_format_args(fmt: str, quality: int | None = None) -> list[str]:
+    if fmt == "audio":
+        return ["-f", "bestaudio[ext=m4a]/bestaudio"]
+    if quality:
+        return [
+            "-f",
+            f"bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<={quality}][ext=mp4]/best",
+        ]
+    return FORMAT_ARGS[fmt]
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/api/qualities")
+async def get_qualities(url: str, request: Request):
+    ip = request.client.host if request.client else "unknown"
+    rate_limit(ip)
+
+    err = validate_download_input(url, "video+audio")
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    vid = extract_video_id(url)
+    loop = asyncio.get_running_loop()
+
+    def run():
+        proc = subprocess.Popen(
+            ["yt-dlp", "--dump-json", "--no-warnings",
+             f"https://www.youtube.com/watch?v={vid}"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            raise TimeoutError("yt-dlp timed out")
+        return proc.returncode, stdout, stderr
+
+    try:
+        returncode, stdout, stderr = await loop.run_in_executor(None, run)
+    except TimeoutError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if returncode != 0:
+        err_text = stderr.decode("utf-8", errors="replace").strip()
+        raise HTTPException(status_code=500, detail=err_text or "failed to fetch formats")
+
+    data = json.loads(stdout)
+    formats = data.get("formats", [])
+
+    heights = sorted(set(
+        f["height"] for f in formats
+        if f.get("vcodec") and f["vcodec"] != "none" and f.get("height")
+    ), reverse=True)
+
+    if not heights:
+        raise HTTPException(status_code=500, detail="no video formats found")
+
+    return {"qualities": heights}
+
+
+@app.post("/api/download")
+async def download(req: DownloadRequest, request: Request):
+    ip = request.client.host if request.client else "unknown"
+    rate_limit(ip)
+
+    err = validate_download_input(req.url, req.format)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    vid = extract_video_id(req.url)
+    fmt = req.format
+    fmt_args = get_format_args(fmt, req.quality)
+
+    title = get_video_title(vid)
+    safe_name = sanitize_filename(title or vid)
+
+    loop = asyncio.get_running_loop()
+
+    def start_proc():
+        return subprocess.Popen(
+            ["yt-dlp", *fmt_args, "-o", "-", "--no-warnings",
+             f"https://www.youtube.com/watch?v={vid}"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    proc = await loop.run_in_executor(None, start_proc)
+
+    def read_first_chunk():
+        return proc.stdout.read(65536)
+
+    try:
+        first_chunk = await asyncio.wait_for(
+            loop.run_in_executor(None, read_first_chunk), timeout=10.0,
+        )
+    except asyncio.TimeoutError:
+        def kill():
+            proc.kill()
+            proc.communicate()
+        await loop.run_in_executor(None, kill)
+        raise HTTPException(status_code=500, detail="yt-dlp timed out")
+
+    if not first_chunk:
+        def get_stderr():
+            _, stderr = proc.communicate()
+            return stderr
+        stderr = await loop.run_in_executor(None, get_stderr)
+        err_text = stderr.decode("utf-8", errors="replace").strip()
+        detail = err_text or "yt-dlp produced no output"
+        raise HTTPException(status_code=500, detail=detail)
+
+    ext = "mp4" if fmt != "audio" else "m4a"
+
+    async def stream():
+        yield first_chunk
+        while True:
+            chunk = await loop.run_in_executor(None, lambda: proc.stdout.read(65536))
+            if not chunk:
+                break
+            yield chunk
+        await loop.run_in_executor(None, proc.wait)
+
+    return StreamingResponse(
+        stream(),
+        media_type=FORMAT_MIME[fmt],
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.{ext}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("src.main:app", host="0.0.0.0", port=8000, reload=True)
