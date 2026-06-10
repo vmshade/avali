@@ -59,14 +59,6 @@
 			openModal("hold up!!!", "you need to enter a link, silly!");
 			return;
 		}
-		if (
-			!inputValue.match(
-				"https?://(www.)?[-a-zA-Z0-9@:%._+~#=]{1,256}.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)",
-			)
-		) {
-			openModal("hold up!!!", "that isn't link, silly!");
-			return;
-		}
 
 		if (errorTimer) clearTimeout(errorTimer);
 		buttonState = "downloading";
