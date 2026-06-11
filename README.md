@@ -19,8 +19,6 @@ special thanks to liquidsquid1 for letting me use an early version of his zinc u
 
 thanks to cobalt.tools, without them i probably wouldn't have made this!
 
---
-
 # selfhosting
 
 requires docker and docker compose
