@@ -92,8 +92,8 @@ def get_format_args(fmt: str, quality: int | None = None, container: str = "mp4"
 
     if fmt == "video+audio":
         if quality:
-            return ["-f", f"best[height<={quality}][ext={vext}]/best"]
-        return ["-f", f"best[ext={vext}]/best"]
+            return ["-f", f"bestvideo[height<={quality}][ext={vext}]+bestaudio[ext={aext}]/best[height<={quality}][ext={vext}]/best"]
+        return ["-f", f"bestvideo[ext={vext}]+bestaudio[ext={aext}]/best[ext={vext}]/best"]
 
     if fmt == "video":
         if quality:

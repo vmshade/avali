@@ -14,6 +14,7 @@
 		List,
 		X,
 	} from "@lucide/svelte";
+	import Spacer from "./components/ui/Spacer.svelte";
 
 	let modalOpen: boolean = $state(false);
 	let inputValue: string = $state("");
@@ -51,6 +52,7 @@
 		id: number;
 		label: string;
 		status: "downloading" | "done" | "error";
+		phase: "processing" | "downloading";
 		blob?: Blob;
 		filename?: string;
 		totalSize?: number;
@@ -75,6 +77,8 @@
 	}
 
 	function showQualityModal(qualities: number[]): Promise<number | null> {
+		patchnotesModalOpen = false;
+		queueModalOpen = false;
 		availableQualities = qualities;
 		qualityModalOpen = true;
 		return new Promise((resolve) => {
@@ -155,7 +159,15 @@
 				? inputValue.trim().slice(0, 50) + "..."
 				: inputValue.trim();
 
-		queue = [...queue, { id: qid, label: urlLabel, status: "downloading" }];
+		queue = [
+			...queue,
+			{
+				id: qid,
+				label: urlLabel,
+				status: "downloading",
+				phase: "processing",
+			},
+		];
 
 		const ac = new AbortController();
 		abortControllers.set(qid, ac);
@@ -244,6 +256,33 @@
 			let loaded = 0;
 			let lastUpdate = 0;
 
+			const first = await reader.read();
+			if (first.done) {
+				openModal("oops!!!", "no data received!");
+				queue = queue.map((i) =>
+					i.id === qid ? { ...i, status: "error" as const } : i,
+				);
+				abortControllers.delete(qid);
+				return;
+			}
+
+			{
+				const idx = queue.findIndex((i) => i.id === qid);
+				if (idx !== -1) {
+					queue[idx] = { ...queue[idx], phase: "downloading" };
+				}
+			}
+
+			chunks.push(first.value);
+			loaded += first.value.length;
+			{
+				const idx = queue.findIndex((i) => i.id === qid);
+				if (idx !== -1) {
+					queue[idx] = { ...queue[idx], loadedSize: loaded };
+				}
+			}
+			lastUpdate = Date.now();
+
 			while (true) {
 				const { done, value } = await reader.read();
 				if (done) break;
@@ -318,16 +357,6 @@
 	}
 </script>
 
-<!-- svelte-ignore a11y_invalid_attribute -->
-<a
-	class="patchnotes-link"
-	href="#"
-	onclick={(e) => {
-		e.preventDefault();
-		patchnotesModalOpen = true;
-	}}>🎉 1.0.0 - fresh outta beta!</a
->
-
 <Modal bind:open={modalOpen} title={modalTitle}>
 	<Text size="md">{modalText}</Text>
 	{#snippet footer()}
@@ -364,9 +393,24 @@
 	}}
 	size="lg"
 >
-	<!-- i should probably migrate this to a .md file in teh future but i really dont care right now -->
+	<!-- i should probably migrate this to a .md file in the future but i really dont care right now -->
+
+	<h1>🔧 1.0.1 - slight tweaks</h1>
+	<p>hey all! this update brings some slight tweaks and bugfixes</p>
+
+	<p>- fixed downloads being capped at 720p, oops</p>
+	<p>- processing animation</p>
+	<p>- patch notes link is now in line with the download queue button</p>
+
+	<br />
+	<p>hope yall enjoy this update!</p>
+	<br />
+	<hr />
+
+	<br />
+
 	<img src="/litten.gif" alt="litten!!!" class="patchnotes-gif" />
-	<h1>🎉 fresh outta beta!</h1>
+	<h1>🎉 1.0.0 - fresh outta beta!</h1>
 	<p>hey all! i'm glad to announce avali is now out of beta!</p>
 	<p>this update brings some nice features i hope yall will enjoy!</p>
 	<br />
@@ -400,10 +444,14 @@
 		{#each queue as item (item.id)}
 			<div class="queue-item">
 				{#if item.status === "downloading" && item.totalSize}
-					{@const pct = Math.min(
-						((item.loadedSize ?? 0) / item.totalSize) * 100,
-						100,
-					)}
+					{@const pct =
+						item.phase === "processing"
+							? 100
+							: Math.min(
+									((item.loadedSize ?? 0) / item.totalSize) *
+										100,
+									100,
+								)}
 					<div class="qi-layer">
 						<span class="queue-item-label">{item.label}</span>
 						<span class="qi-size"
@@ -419,12 +467,19 @@
 							><X size={14} /></Button
 						>
 					</div>
-					<div class="qi-fill" style="width: {pct}%"></div>
+					<div
+						class="qi-fill {item.phase === 'processing'
+							? 'qi-fill-processing'
+							: ''}"
+						style="width: {pct}%"
+					></div>
 				{:else}
 					<span class="queue-item-label">{item.label}</span>
 					<span class="queue-item-actions">
 						{#if item.status === "downloading"}
-							downloading...
+							{item.phase === "processing"
+								? "processing..."
+								: "downloading..."}
 						{:else if item.status === "done"}
 							<Button
 								variant="primary"
@@ -455,13 +510,24 @@
 	{/if}
 </Modal>
 
-<div class="queue-btn-wrap">
-	<Button variant="outline" icon onclick={() => (queueModalOpen = true)}
-		><List size={20} /></Button
+<div class="top-bar">
+	<!-- svelte-ignore a11y_invalid_attribute -->
+	<a
+		class="patchnotes-link"
+		href="#"
+		onclick={(e) => {
+			e.preventDefault();
+			patchnotesModalOpen = true;
+		}}>🔧 1.0.1 - slight tweaks</a
 	>
-	{#if queue.length > 0}
-		<span class="queue-badge">{doneCount}/{queue.length}</span>
-	{/if}
+	<div class="queue-btn-wrap">
+		<Button variant="outline" icon onclick={() => (queueModalOpen = true)}
+			><List size={20} /></Button
+		>
+		{#if queue.length > 0}
+			<span class="queue-badge">{doneCount}/{queue.length}</span>
+		{/if}
+	</div>
 </div>
 
 <div class="main">
@@ -583,16 +649,25 @@
 		width: min(500px, calc(100vw - 2rem));
 		margin-bottom: 15px;
 	}
-	.patchnotes-link {
+	.top-bar {
 		position: fixed;
-		top: 15px;
-		left: 50%;
-		transform: translateX(-50%);
-		color: var(--text-dim);
-		text-decoration: none;
-		cursor: pointer;
+		top: 22px;
+		left: 0;
+		right: 0;
 		z-index: 20;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0 15px;
+		pointer-events: none;
+	}
+	.top-bar > * {
+		pointer-events: auto;
+	}
+	.patchnotes-link {
+		color: var(--text-dim);
 		text-decoration: underline;
+		cursor: pointer;
 		font-size: small;
 		white-space: nowrap;
 	}
@@ -611,9 +686,7 @@
 
 	.queue-btn-wrap {
 		position: absolute;
-		top: 10px;
-		right: 10px;
-		z-index: 10;
+		right: 15px;
 	}
 	.queue-badge {
 		position: absolute;
@@ -669,6 +742,19 @@
 		pointer-events: none;
 		transition: width 0.15s ease;
 		border-radius: inherit;
+	}
+	@keyframes qi-pulse {
+		0%,
+		100% {
+			opacity: 0;
+		}
+		50% {
+			opacity: 0.45;
+		}
+	}
+	.qi-fill-processing {
+		animation: qi-pulse 1.5s ease-in-out infinite;
+		mix-blend-mode: normal;
 	}
 	.qi-size {
 		font-size: 0.75rem;
