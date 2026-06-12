@@ -78,27 +78,22 @@ def get_format_args(fmt: str, quality: int | None = None, container: str = "mp4"
             return ["-f", "bestaudio", "--extract-audio", "--audio-format", container]
         return ["-f", "bestaudio[ext=m4a]/bestaudio"]
 
-    if container == "mkv":
-        if quality:
-            return [
-                "-f",
-                f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best",
-                "--merge-output-format", "mkv",
-            ]
-        return ["-f", "bestvideo+bestaudio", "--merge-output-format", "mkv"]
-
-    vext = container
-    aext = "m4a" if container == "mp4" else "webm"
-
     if fmt == "video+audio":
+        if container == "mkv":
+            if quality:
+                return ["-f", f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best", "--merge-output-format", "mkv"]
+            return ["-f", "bestvideo+bestaudio/best", "--merge-output-format", "mkv"]
+        vext = container
+        aext = "m4a" if container == "mp4" else "webm"
         if quality:
-            return ["-f", f"bestvideo[height<={quality}][ext={vext}]+bestaudio[ext={aext}]/best[height<={quality}][ext={vext}]/best"]
-        return ["-f", f"bestvideo[ext={vext}]+bestaudio[ext={aext}]/best[ext={vext}]/best"]
+            return ["-f", f"bestvideo[height<={quality}][ext={vext}]+bestaudio[ext={aext}]/best[height<={quality}][ext={vext}]/best", "--merge-output-format", container]
+        return ["-f", f"bestvideo[ext={vext}]+bestaudio[ext={aext}]/best[ext={vext}]/best", "--merge-output-format", container]
 
     if fmt == "video":
+        vext = container if container in ("mp4", "webm", "mkv") else "mp4"
         if quality:
-            return ["-f", f"bestvideo[height<={quality}][ext={vext}]+bestaudio[ext={aext}]/best[height<={quality}][ext={vext}]/best"]
-        return ["-f", f"bestvideo[ext={vext}]+bestaudio[ext={aext}]/best[ext={vext}]/best"]
+            return ["-f", f"bestvideo[height<={quality}][ext={vext}]/best[height<={quality}][ext={vext}]/best"]
+        return ["-f", f"bestvideo[ext={vext}]/best[ext={vext}]/best"]
 
     return ["-f", "best[ext=mp4]/best"]
 
