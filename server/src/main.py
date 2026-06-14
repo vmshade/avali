@@ -76,26 +76,28 @@ def get_format_args(fmt: str, quality: int | None = None, container: str = "mp4"
     if fmt == "audio":
         if container in ("mp3", "wav", "flac"):
             return ["-f", "bestaudio", "--extract-audio", "--audio-format", container]
-        return ["-f", "bestaudio[ext=m4a]/bestaudio"]
+        return ["-f", "bestaudio[ext=m4a]/bestaudio", "--merge-output-format", "mp4"]
 
     if fmt == "video+audio":
         if container == "mkv":
             if quality:
                 return ["-f", f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best", "--merge-output-format", "mkv"]
             return ["-f", "bestvideo+bestaudio/best", "--merge-output-format", "mkv"]
-        vext = container
-        aext = "m4a" if container == "mp4" else "webm"
+        if container == "webm":
+            if quality:
+                return ["-f", f"bestvideo[height<={quality}][ext=webm]+bestaudio[ext=webm]/bestvideo[height<={quality}]+bestaudio/best", "--merge-output-format", "webm"]
+            return ["-f", "bestvideo[ext=webm]+bestaudio[ext=webm]/bestvideo+bestaudio/best", "--merge-output-format", "webm"]
         if quality:
-            return ["-f", f"bestvideo[height<={quality}][ext={vext}]+bestaudio[ext={aext}]/best[height<={quality}][ext={vext}]/best", "--merge-output-format", container]
-        return ["-f", f"bestvideo[ext={vext}]+bestaudio[ext={aext}]/best[ext={vext}]/best", "--merge-output-format", container]
+            return ["-f", f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best", "--merge-output-format", "mp4"]
+        return ["-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4"]
 
     if fmt == "video":
         vext = container if container in ("mp4", "webm", "mkv") else "mp4"
         if quality:
-            return ["-f", f"bestvideo[height<={quality}][ext={vext}]/best[height<={quality}][ext={vext}]/best"]
-        return ["-f", f"bestvideo[ext={vext}]/best[ext={vext}]/best"]
+            return ["-f", f"bestvideo[height<={quality}][ext={vext}]/bestvideo[height<={quality}]/best"]
+        return ["-f", f"bestvideo[ext={vext}]/bestvideo/best"]
 
-    return ["-f", "best[ext=mp4]/best"]
+    return ["-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4"]
 
 
 @app.get("/api/health")
@@ -126,7 +128,7 @@ async def get_qualities(url: str, request: Request):
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.communicate()
-            raise TimeoutError("ytdlp timed out")
+            raise TimeoutError("yt-dlp timed out")
         return proc.returncode, stdout, stderr
 
     try:
@@ -241,16 +243,16 @@ async def download(req: DownloadRequest, request: Request):
 
     try:
         first_chunk = await asyncio.wait_for(
-            loop.run_in_executor(None, read_first_chunk), timeout=10.0,
+            loop.run_in_executor(None, read_first_chunk), timeout=30.0,
         )
     except asyncio.TimeoutError:
         await loop.run_in_executor(None, proc.kill)
         await loop.run_in_executor(None, proc.wait)
-        raise HTTPException(status_code=500, detail="ytdlp timed out")
+        raise HTTPException(status_code=500, detail="yt-dlp timed out")
 
     if not first_chunk:
         await loop.run_in_executor(None, proc.wait)
-        raise HTTPException(status_code=500, detail="ytdlp produced no output")
+        raise HTTPException(status_code=500, detail="yt-dlp produced no output")
 
     container = req.container
     if fmt == "audio":

@@ -10,10 +10,11 @@
 
 html {
   font-family: 'Geist Mono', 'Fira Code', monospace;
-  background: $zinc-950;
-  color: $zinc-100;
+  background: var(--bg);
+  color: var(--text);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 body {
@@ -38,8 +39,8 @@ a {
 }
 
 ::selection {
-  background: $zinc-100;
-  color: $zinc-950;
+  background: var(--text);
+  color: var(--bg);
 }
 
 ::-webkit-scrollbar {
@@ -50,7 +51,8 @@ html {
   scrollbar-width: none;
 }
 
-:root {
+:root,
+[data-theme="dark"] {
   --bg: #{$zinc-950};
   --surface: #{$zinc-900};
   --surface-raised: #{$zinc-900};
@@ -64,8 +66,21 @@ html {
   --accent: #{$zinc-50};
 }
 
-@media (prefers-reduced-motion: reduce) {
+[data-theme="light"] {
+  --bg: #{$zinc-50};
+  --surface: #{$zinc-100};
+  --surface-raised: #{$zinc-100};
+  --surface-hover: #{$zinc-200};
+  --border: #{$zinc-200};
+  --border-strong: #{$zinc-300};
+  --text: #{$zinc-900};
+  --text-muted: #{$zinc-600};
+  --text-dim: #{$zinc-500};
+  --primary: #{$zinc-800};
+  --accent: #{$zinc-950};
+}
 
+@media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {

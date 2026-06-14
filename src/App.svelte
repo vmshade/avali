@@ -13,8 +13,11 @@
 		Download,
 		List,
 		X,
+		Settings,
+		Info,
+		Sun,
+		Moon,
 	} from "@lucide/svelte";
-	import Spacer from "./components/ui/Spacer.svelte";
 
 	let modalOpen: boolean = $state(false);
 	let inputValue: string = $state("");
@@ -29,9 +32,14 @@
 	let availableQualities: number[] = $state([]);
 	let qualityPromiseResolve: ((h: number | null) => void) | null = null;
 
-	let patchnotesModalOpen: boolean = $state(false);
+	let settingsModalOpen: boolean = $state(false);
+	let aboutModalOpen: boolean = $state(false);
 
-	let errorTimer: ReturnType<typeof setTimeout> | null = null;
+	let isDark: boolean = $state(true);
+
+	$effect(() => {
+		document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+	});
 
 	$effect(() => {
 		selectedFormat;
@@ -77,7 +85,8 @@
 	}
 
 	function showQualityModal(qualities: number[]): Promise<number | null> {
-		patchnotesModalOpen = false;
+		settingsModalOpen = false;
+		aboutModalOpen = false;
 		queueModalOpen = false;
 		availableQualities = qualities;
 		qualityModalOpen = true;
@@ -98,21 +107,10 @@
 		qualityPromiseResolve = null;
 	}
 
-	function addToQueue(
-		id: number,
-		label: string,
-		blob?: Blob,
-		filename?: string,
-	) {
+	function addToQueue(id: number, label: string, blob?: Blob, filename?: string) {
 		const idx = queue.findIndex((i) => i.id === id);
 		if (idx !== -1) {
-			queue[idx] = {
-				...queue[idx],
-				label,
-				status: "done",
-				blob,
-				filename,
-			};
+			queue[idx] = { ...queue[idx], label, status: "done", blob, filename };
 		}
 	}
 
@@ -145,12 +143,11 @@
 	}
 
 	async function downloadVideo() {
-		if (inputValue == "") {
+		if (inputValue === "") {
 			openModal("hold up!!!", "you need to enter a link, silly!");
 			return;
 		}
 
-		if (errorTimer) clearTimeout(errorTimer);
 		buttonState = "downloading";
 
 		const qid = nextQueueId++;
@@ -181,8 +178,7 @@
 						{ signal: ac.signal },
 					);
 					if (qualRes.ok) {
-						const data: { qualities: number[] } =
-							await qualRes.json();
+						const data: { qualities: number[] } = await qualRes.json();
 						if (data.qualities?.length) {
 							const h = await showQualityModal(data.qualities);
 							if (h === null) {
@@ -196,7 +192,7 @@
 					}
 				} catch (e) {
 					if (ac.signal.aborted) throw e;
-					console.log("failed to fetch quality options!");
+					console.warn("failed to fetch quality options");
 				}
 			}
 
@@ -243,11 +239,12 @@
 
 			if (!res.ok) {
 				const err = await res.json();
-				openModal("oops!!!", err.error ?? "something went wrong!");
+				openModal("oops!!!", err.detail ?? "something went wrong!");
 				queue = queue.map((i) =>
 					i.id === qid ? { ...i, status: "error" as const } : i,
 				);
 				abortControllers.delete(qid);
+				buttonState = "idle";
 				return;
 			}
 
@@ -263,6 +260,7 @@
 					i.id === qid ? { ...i, status: "error" as const } : i,
 				);
 				abortControllers.delete(qid);
+				buttonState = "idle";
 				return;
 			}
 
@@ -310,8 +308,7 @@
 			});
 			const header = res.headers.get("Content-Disposition");
 			const match = header?.match(/filename="?(.+?)"?$/);
-			const filename =
-				match?.[1] ?? `video.${blob.type.split("/")[1] ?? "mp4"}`;
+			const filename = match?.[1] ?? `video.${blob.type.split("/")[1] ?? "mp4"}`;
 
 			addToQueue(qid, filename, blob, filename);
 
@@ -325,6 +322,7 @@
 			URL.revokeObjectURL(url);
 
 			abortControllers.delete(qid);
+			buttonState = "idle";
 		} catch (err) {
 			if (err instanceof DOMException && err.name === "AbortError") {
 				queue = queue.filter((i) => i.id !== qid);
@@ -337,106 +335,125 @@
 				i.id === qid ? { ...i, status: "error" as const } : i,
 			);
 			abortControllers.delete(qid);
+			buttonState = "idle";
 		}
 	}
-
-	$effect(() => {
-		return () => {
-			if (errorTimer) clearTimeout(errorTimer);
-		};
-	});
 
 	if (!document.cookie.includes("seenInfo=true")) {
 		openModal(
 			"owo what's this?",
 			"avali is a completely free youtube downloader. no paywalls, no ads, no bullshit. just paste a link, pick your format, and go!",
 		);
-
-		document.cookie =
-			"seenInfo=true; max-age=31536000; path=/; SameSite=Strict";
+		document.cookie = "seenInfo=true; max-age=31536000; path=/; SameSite=Strict";
 	}
 </script>
 
 <Modal bind:open={modalOpen} title={modalTitle}>
 	<Text size="md">{modalText}</Text>
 	{#snippet footer()}
-		<Button variant="primary" size="sm" onclick={() => (modalOpen = false)}
-			>okay!</Button
-		>
+		<Button variant="primary" size="sm" onclick={() => (modalOpen = false)}>okay!</Button>
 	{/snippet}
 </Modal>
 
-<Modal
-	bind:open={qualityModalOpen}
-	title="select quality"
-	onclose={cancelQuality}
-	size="sm"
->
+<Modal bind:open={qualityModalOpen} title="select quality" onclose={cancelQuality} size="sm">
 	<div class="quality-list">
 		{#each availableQualities as height}
-			<Button variant="outline" onclick={() => selectQuality(height)}
-				>{height}p</Button
-			>
+			<Button variant="outline" onclick={() => selectQuality(height)}>{height}p</Button>
 		{/each}
 	</div>
 	{#snippet footer()}
-		<Button variant="ghost" size="sm" onclick={cancelQuality}>cancel</Button
-		>
+		<Button variant="ghost" size="sm" onclick={cancelQuality}>cancel</Button>
 	{/snippet}
 </Modal>
 
-<Modal
-	bind:open={patchnotesModalOpen}
-	title="patch notes"
-	onclose={() => {
-		patchnotesModalOpen = false;
-	}}
-	size="lg"
->
-	<!-- i should probably migrate this to a .md file in the future but i really dont care right now -->
+<Modal bind:open={settingsModalOpen} title="settings" size="sm">
+	<div class="settings-list">
+		<div class="settings-row">
+			<span class="settings-label">theme</span>
+			<button class="theme-toggle" onclick={() => (isDark = !isDark)} aria-label="toggle theme">
+				{#if isDark}
+					<Moon size={16} />
+					<span>dark</span>
+				{:else}
+					<Sun size={16} />
+					<span>light</span>
+				{/if}
+			</button>
+		</div>
+		<div class="settings-divider"></div>
+		<div class="settings-row">
+			<span class="settings-label">default format</span>
+			<div class="settings-btn-group">
+				<Button variant={selectedFormat === "video+audio" ? "primary" : "outline"} size="sm" onclick={() => (selectedFormat = "video+audio")}>video</Button>
+				<Button variant={selectedFormat === "audio" ? "primary" : "outline"} size="sm" onclick={() => (selectedFormat = "audio")}>audio</Button>
+				<Button variant={selectedFormat === "video" ? "primary" : "outline"} size="sm" onclick={() => (selectedFormat = "video")}>mute</Button>
+			</div>
+		</div>
+		<div class="settings-divider"></div>
+		<div class="settings-row">
+			<span class="settings-label">default container</span>
+			<div class="settings-btn-group">
+				{#if selectedFormat === "audio"}
+					<Button variant={selectedContainer === "mp4" ? "primary" : "outline"} size="sm" onclick={() => (selectedContainer = "mp4")}>m4a</Button>
+					<Button variant={selectedContainer === "mp3" ? "primary" : "outline"} size="sm" onclick={() => (selectedContainer = "mp3")}>mp3</Button>
+					<Button variant={selectedContainer === "wav" ? "primary" : "outline"} size="sm" onclick={() => (selectedContainer = "wav")}>wav</Button>
+					<Button variant={selectedContainer === "flac" ? "primary" : "outline"} size="sm" onclick={() => (selectedContainer = "flac")}>flac</Button>
+				{:else}
+					<Button variant={selectedContainer === "mp4" ? "primary" : "outline"} size="sm" onclick={() => (selectedContainer = "mp4")}>mp4</Button>
+					<Button variant={selectedContainer === "webm" ? "primary" : "outline"} size="sm" onclick={() => (selectedContainer = "webm")}>webm</Button>
+					<Button variant={selectedContainer === "mkv" ? "primary" : "outline"} size="sm" onclick={() => (selectedContainer = "mkv")}>mkv</Button>
+				{/if}
+			</div>
+		</div>
+	</div>
+	{#snippet footer()}
+		<Button variant="primary" size="sm" onclick={() => (settingsModalOpen = false)}>done</Button>
+	{/snippet}
+</Modal>
 
-	<h1>🔧 1.0.1 - slight tweaks</h1>
-	<p>hey all! this update brings some slight tweaks and bugfixes</p>
-
-	<p>- fixed downloads being capped at 720p, oops</p>
-	<p>- processing animation</p>
-	<p>- patch notes link is now in line with the download queue button</p>
-
-	<br />
-	<p>hope yall enjoy this update!</p>
-	<br />
-	<hr />
-
-	<br />
-
-	<img src="/litten.gif" alt="litten!!!" class="patchnotes-gif" />
-	<h1>🎉 1.0.0 - fresh outta beta!</h1>
-	<p>hey all! i'm glad to announce avali is now out of beta!</p>
-	<p>this update brings some nice features i hope yall will enjoy!</p>
-	<br />
-	<h2 class="margin-shit">- 📜 download queue!</h2>
-	<p>
-		there's now a download queue! you can queue up videos and have them
-		downloaded one after another!
-	</p>
-	<p>
-		this queue also shows things like download progress, filesize, lets you
-		redownload videos you've downloaded this session, and remove items from
-		queue.
-	</p>
-	<h2 class="margin-shit">- 📹 format selection!</h2>
-	<p>
-		you can now pick which format your video downlodas at! pretty
-		self-explanitory
-	</p>
-	<h2 class="margin-shit">- 📱 mobile improvements!</h2>
-	<p>website works a lot beter on mobile now!</p>
-	<h2 class="margin-shit">- 🚢 selfhosting!</h2>
-	<p>you can selfhost avali now in docker!</p>
-
-	<h2 class="margin-shit">- ❤ thanks!</h2>
-
-	<p>thanks for using avali! - niko</p>
+<Modal bind:open={aboutModalOpen} title="about avali" size="md">
+	<div class="about-content">
+		<div class="about-logo">///avali</div>
+		<Text size="md">a free, open-source youtube downloader. no paywalls, no ads, no tracking — just paste a link and go.</Text>
+		<div class="about-divider"></div>
+		<div class="about-row">
+			<span class="about-key">version</span>
+			<span class="about-val">1.1.0</span>
+		</div>
+		<div class="about-row">
+			<span class="about-key">made by</span>
+			<span class="about-val"><a href="https://xenon.zone" class="about-link">🦌 xenon</a></span>
+		</div>
+		<div class="about-row">
+			<span class="about-key">formats</span>
+			<span class="about-val">mp4, webm, mkv, mp3, wav, flac, m4a</span>
+		</div>
+		<div class="about-divider"></div>
+		<Text size="md">
+			avali uses <a href="https://github.com/yt-dlp/yt-dlp" class="about-link">yt-dlp</a> under the hood for downloading and ffmpeg for post-processing. please download responsibly and respect content creators.
+		</Text>
+		<div class="about-divider"></div>
+		<div class="about-changelog">
+			<span class="about-key">changelog</span>
+			<div class="about-changes">
+				<div class="change-entry">
+					<span class="change-ver">1.1.0</span>
+					<span class="change-desc">settings menu, light/dark theme, about page, mp4 audio fix</span>
+				</div>
+				<div class="change-entry">
+					<span class="change-ver">1.0.1</span>
+					<span class="change-desc">fixed 720p cap, processing animation, ui tweaks</span>
+				</div>
+				<div class="change-entry">
+					<span class="change-ver">1.0.0</span>
+					<span class="change-desc">download queue, format selection, mobile improvements, docker support</span>
+				</div>
+			</div>
+		</div>
+	</div>
+	{#snippet footer()}
+		<Button variant="primary" size="sm" onclick={() => (aboutModalOpen = false)}>close</Button>
+	{/snippet}
 </Modal>
 
 <Modal bind:open={queueModalOpen} title="download queue" size="md">
@@ -444,60 +461,24 @@
 		{#each queue as item (item.id)}
 			<div class="queue-item">
 				{#if item.status === "downloading" && item.totalSize}
-					{@const pct =
-						item.phase === "processing"
-							? 100
-							: Math.min(
-									((item.loadedSize ?? 0) / item.totalSize) *
-										100,
-									100,
-								)}
+					{@const pct = item.phase === "processing" ? 100 : Math.min(((item.loadedSize ?? 0) / item.totalSize) * 100, 100)}
 					<div class="qi-layer">
 						<span class="queue-item-label">{item.label}</span>
-						<span class="qi-size"
-							>{formatBytes(item.loadedSize ?? 0)}/{formatBytes(
-								item.totalSize,
-							)}</span
-						>
-						<Button
-							variant="ghost"
-							size="sm"
-							icon
-							onclick={() => removeFromQueue(item.id)}
-							><X size={14} /></Button
-						>
+						<span class="qi-size">{formatBytes(item.loadedSize ?? 0)}/{formatBytes(item.totalSize)}</span>
+						<Button variant="ghost" size="sm" icon onclick={() => removeFromQueue(item.id)}><X size={14} /></Button>
 					</div>
-					<div
-						class="qi-fill {item.phase === 'processing'
-							? 'qi-fill-processing'
-							: ''}"
-						style="width: {pct}%"
-					></div>
+					<div class="qi-fill {item.phase === 'processing' ? 'qi-fill-processing' : ''}" style="width: {pct}%"></div>
 				{:else}
 					<span class="queue-item-label">{item.label}</span>
 					<span class="queue-item-actions">
 						{#if item.status === "downloading"}
-							{item.phase === "processing"
-								? "processing..."
-								: "downloading..."}
+							{item.phase === "processing" ? "processing..." : "downloading..."}
 						{:else if item.status === "done"}
-							<Button
-								variant="primary"
-								size="sm"
-								icon
-								onclick={() => downloadFromQueue(item.id)}
-								><Download size={16} /></Button
-							>
+							<Button variant="primary" size="sm" icon onclick={() => downloadFromQueue(item.id)}><Download size={16} /></Button>
 						{:else}
 							error
 						{/if}
-						<Button
-							variant="ghost"
-							size="sm"
-							icon
-							onclick={() => removeFromQueue(item.id)}
-							><X size={14} /></Button
-						>
+						<Button variant="ghost" size="sm" icon onclick={() => removeFromQueue(item.id)}><X size={14} /></Button>
 					</span>
 				{/if}
 			</div>
@@ -511,22 +492,30 @@
 </Modal>
 
 <div class="top-bar">
-	<!-- svelte-ignore a11y_invalid_attribute -->
-	<a
-		class="patchnotes-link"
-		href="#"
-		onclick={(e) => {
-			e.preventDefault();
-			patchnotesModalOpen = true;
-		}}>🔧 1.0.1 - slight tweaks</a
-	>
-	<div class="queue-btn-wrap">
-		<Button variant="outline" icon onclick={() => (queueModalOpen = true)}
-			><List size={20} /></Button
-		>
-		{#if queue.length > 0}
-			<span class="queue-badge">{doneCount}/{queue.length}</span>
-		{/if}
+	<div class="top-bar-left">
+		<Button variant="ghost" size="sm" icon onclick={() => (aboutModalOpen = true)} aria-label="about">
+			<Info size={18} />
+		</Button>
+	</div>
+	<div class="top-bar-right">
+		<Button variant="ghost" size="sm" icon onclick={() => (isDark = !isDark)} aria-label="toggle theme">
+			{#if isDark}
+				<Sun size={18} />
+			{:else}
+				<Moon size={18} />
+			{/if}
+		</Button>
+		<Button variant="ghost" size="sm" icon onclick={() => (settingsModalOpen = true)} aria-label="settings">
+			<Settings size={18} />
+		</Button>
+		<div class="queue-btn-wrap">
+			<Button variant="outline" icon onclick={() => (queueModalOpen = true)} aria-label="download queue">
+				<List size={20} />
+			</Button>
+			{#if queue.length > 0}
+				<span class="queue-badge">{doneCount}/{queue.length}</span>
+			{/if}
+		</div>
 	</div>
 </div>
 
@@ -534,10 +523,7 @@
 	<Heading>///avali</Heading>
 	<div class="input">
 		<div class="flex1">
-			<Input
-				placeholder="paste your link here!"
-				bind:value={inputValue}
-			/>
+			<Input placeholder="paste your link here!" bind:value={inputValue} />
 		</div>
 		<Button onclick={downloadVideo} disabled={buttonState !== "idle"}>
 			{buttonText()}
@@ -549,63 +535,33 @@
 		</div>
 	{/if}
 	<div class="options">
-		<Button
-			variant={selectedFormat === "video+audio" ? "primary" : "outline"}
-			onclick={() => (selectedFormat = "video+audio")}
-			><Video size={20} /> video</Button
-		>
-		<Button
-			variant={selectedFormat === "audio" ? "primary" : "outline"}
-			onclick={() => (selectedFormat = "audio")}
-			><Volume2 size={20} /> audio</Button
-		>
-		<Button
-			variant={selectedFormat === "video" ? "primary" : "outline"}
-			onclick={() => (selectedFormat = "video")}
-			><VolumeOff size={20} /> mute</Button
-		>
+		<Button variant={selectedFormat === "video+audio" ? "primary" : "outline"} onclick={() => (selectedFormat = "video+audio")}>
+			<Video size={20} /> video
+		</Button>
+		<Button variant={selectedFormat === "audio" ? "primary" : "outline"} onclick={() => (selectedFormat = "audio")}>
+			<Volume2 size={20} /> audio
+		</Button>
+		<Button variant={selectedFormat === "video" ? "primary" : "outline"} onclick={() => (selectedFormat = "video")}>
+			<VolumeOff size={20} /> mute
+		</Button>
 	</div>
 	<div class="options container-options">
 		{#if selectedFormat === "audio"}
-			<Button
-				variant={selectedContainer === "mp4" ? "primary" : "outline"}
-				onclick={() => (selectedContainer = "mp4")}>m4a</Button
-			>
-			<Button
-				variant={selectedContainer === "mp3" ? "primary" : "outline"}
-				onclick={() => (selectedContainer = "mp3")}>mp3</Button
-			>
-			<Button
-				variant={selectedContainer === "wav" ? "primary" : "outline"}
-				onclick={() => (selectedContainer = "wav")}>wav</Button
-			>
-			<Button
-				variant={selectedContainer === "flac" ? "primary" : "outline"}
-				onclick={() => (selectedContainer = "flac")}>flac</Button
-			>
+			<Button variant={selectedContainer === "mp4" ? "primary" : "outline"} onclick={() => (selectedContainer = "mp4")}>m4a</Button>
+			<Button variant={selectedContainer === "mp3" ? "primary" : "outline"} onclick={() => (selectedContainer = "mp3")}>mp3</Button>
+			<Button variant={selectedContainer === "wav" ? "primary" : "outline"} onclick={() => (selectedContainer = "wav")}>wav</Button>
+			<Button variant={selectedContainer === "flac" ? "primary" : "outline"} onclick={() => (selectedContainer = "flac")}>flac</Button>
 		{:else}
-			<Button
-				variant={selectedContainer === "mp4" ? "primary" : "outline"}
-				onclick={() => (selectedContainer = "mp4")}>mp4</Button
-			>
-			<Button
-				variant={selectedContainer === "webm" ? "primary" : "outline"}
-				onclick={() => (selectedContainer = "webm")}>webm</Button
-			>
-			<Button
-				variant={selectedContainer === "mkv" ? "primary" : "outline"}
-				onclick={() => (selectedContainer = "mkv")}>mkv</Button
-			>
+			<Button variant={selectedContainer === "mp4" ? "primary" : "outline"} onclick={() => (selectedContainer = "mp4")}>mp4</Button>
+			<Button variant={selectedContainer === "webm" ? "primary" : "outline"} onclick={() => (selectedContainer = "webm")}>webm</Button>
+			<Button variant={selectedContainer === "mkv" ? "primary" : "outline"} onclick={() => (selectedContainer = "mkv")}>mkv</Button>
 		{/if}
 	</div>
 </div>
 
 <div class="down">
 	<p>
-		download responsibly! made with ❤︎ by <a
-			href="https://xenon.zone"
-			class="mysite"><span class="notoemoji">🦌</span>xenon</a
-		>
+		download responsibly! made with ❤︎ by <a href="https://xenon.zone" class="mysite"><span class="notoemoji">🦌</span>xenon</a>
 	</p>
 </div>
 
@@ -642,6 +598,9 @@
 		text-align: center;
 		opacity: 50%;
 	}
+	.mysite {
+		text-decoration: underline;
+	}
 	.notoemoji {
 		font-family: "Noto Emoji", monospace;
 	}
@@ -651,42 +610,36 @@
 	}
 	.top-bar {
 		position: fixed;
-		top: 22px;
+		top: 16px;
 		left: 0;
 		right: 0;
 		z-index: 20;
 		display: flex;
 		align-items: center;
-		justify-content: center;
-		padding: 0 15px;
+		justify-content: space-between;
+		padding: 0 12px;
 		pointer-events: none;
 	}
 	.top-bar > * {
 		pointer-events: auto;
 	}
-	.patchnotes-link {
-		color: var(--text-dim);
-		text-decoration: underline;
-		cursor: pointer;
-		font-size: small;
-		white-space: nowrap;
+	.top-bar-left {
+		display: flex;
+		align-items: center;
+		gap: 4px;
 	}
-	.patchnotes-link:hover {
-		color: var(--text-muted);
-	}
-	.patchnotes-gif {
-		width: 100%;
-		margin-bottom: 15px;
+	.top-bar-right {
+		display: flex;
+		align-items: center;
+		gap: 4px;
 	}
 	.quality-list {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
 	}
-
 	.queue-btn-wrap {
-		position: absolute;
-		right: 15px;
+		position: relative;
 	}
 	.queue-badge {
 		position: absolute;
@@ -716,6 +669,7 @@
 		border: 1px solid var(--border);
 		border-radius: 0.375rem;
 		position: relative;
+		overflow: hidden;
 	}
 	.queue-item-label {
 		font-size: 0.8rem;
@@ -731,6 +685,7 @@
 		gap: 0.5rem;
 		width: 100%;
 		position: relative;
+		z-index: 1;
 	}
 	.qi-fill {
 		position: absolute;
@@ -741,16 +696,10 @@
 		mix-blend-mode: difference;
 		pointer-events: none;
 		transition: width 0.15s ease;
-		border-radius: inherit;
 	}
 	@keyframes qi-pulse {
-		0%,
-		100% {
-			opacity: 0;
-		}
-		50% {
-			opacity: 0.45;
-		}
+		0%, 100% { opacity: 0; }
+		50% { opacity: 0.45; }
 	}
 	.qi-fill-processing {
 		animation: qi-pulse 1.5s ease-in-out infinite;
@@ -773,6 +722,111 @@
 		text-align: center;
 		padding: 1rem;
 	}
+	.settings-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0;
+	}
+	.settings-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.65rem 0;
+	}
+	.settings-label {
+		font-size: 0.8rem;
+		color: var(--text-muted);
+		flex-shrink: 0;
+	}
+	.settings-divider {
+		height: 1px;
+		background: var(--border);
+	}
+	.settings-btn-group {
+		display: flex;
+		gap: 0.35rem;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+	.theme-toggle {
+		all: unset;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.8rem;
+		font-family: inherit;
+		color: var(--text-muted);
+		border: 1px solid var(--border);
+		padding: 0.3rem 0.6rem;
+		transition: border-color 0.15s, color 0.15s;
+	}
+	.theme-toggle:hover {
+		border-color: var(--text);
+		color: var(--text);
+	}
+	.about-content {
+		display: flex;
+		flex-direction: column;
+		gap: 0.85rem;
+	}
+	.about-logo {
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: var(--text);
+		letter-spacing: -0.02em;
+	}
+	.about-divider {
+		height: 1px;
+		background: var(--border);
+	}
+	.about-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 1rem;
+		font-size: 0.8rem;
+	}
+	.about-key {
+		color: var(--text-muted);
+		flex-shrink: 0;
+	}
+	.about-val {
+		color: var(--text);
+		text-align: right;
+	}
+	.about-link {
+		color: var(--text);
+		text-decoration: underline;
+	}
+	.about-link:hover {
+		color: var(--accent);
+	}
+	.about-changelog {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.about-changes {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+		margin-top: 0.35rem;
+	}
+	.change-entry {
+		display: flex;
+		gap: 0.75rem;
+		font-size: 0.75rem;
+	}
+	.change-ver {
+		color: var(--text-muted);
+		flex-shrink: 0;
+		width: 2.5rem;
+	}
+	.change-desc {
+		color: var(--text);
+	}
 
 	@media (max-width: 768px) {
 		.main {
@@ -786,9 +840,5 @@
 			position: static;
 			padding: 1rem;
 		}
-	}
-	.margin-shit {
-		margin-bottom: 10px;
-		margin-top: 10px;
 	}
 </style>
